@@ -1,0 +1,336 @@
+# ============================================================
+# Audience Warframe · 共享镜像（世界状态 + 市场行情）GitHub Action
+#
+# v1.5 修正版：每 15 分钟抓一轮 warframe.market 实时报价（198 件在榜商品），
+#   写入 market.json。应用经 gh-proxy / jsdelivr 读取，市场页从此国内直达。
+#
+# 用法（一次性，约 1 分钟）：
+#   1. 打开镜像仓库 AudienceAgent/-warframe-mirror
+#   2. 用本文件整体替换 .github/workflows/mirror.yml
+#   3. 仓库 Settings → Actions → 确认 Workflow permissions 为 "Read and write"
+#   4. Actions 标签页 → 选本工作流 → Run workflow 手动跑一次，确认出现 market.json
+#   之后全自动，无需再管。
+# ============================================================
+name: Mirror Warframe worldstate + market
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch worldstate (zh)
+        continue-on-error: true
+        run: |
+          curl -fsSL --retry 3 --retry-delay 2 \
+            -A "wf-hub-mirror/1.5" \
+            "https://api.warframestat.us/pc/?language=zh" \
+            -o worldstate.json || echo "worldstate fetch failed, keeping previous"
+          echo "worldstate bytes: $(wc -c < worldstate.json 2>/dev/null || echo 0)"
+
+      - name: Refresh market quotes
+        run: |
+          python3 - <<'PY'
+          import json, time, urllib.request, urllib.error, datetime
+
+          UA = {
+              "User-Agent": "wf-hub-mirror/1.5",
+              "Accept": "application/json",
+              "Language": "zh-hans",
+          }
+
+          SLUGS = """
+          acceltra_prime_set
+          adaptation
+          akbronco_prime_set
+          aklex_prime_set
+          aksomati_prime_set
+          akstiletto_prime_set
+          akvasto_prime_set
+          arcane_agility
+          arcane_arachne
+          arcane_avenger
+          arcane_blessing
+          arcane_consequence
+          arcane_deflection
+          arcane_energize
+          arcane_eruption
+          arcane_fury
+          arcane_grace
+          arcane_guardian
+          arcane_healing
+          arcane_ice
+          arcane_nullifier
+          arcane_precision
+          arcane_pulse
+          arcane_resistance
+          arcane_strike
+          arcane_tempo
+          arcane_trickery
+          arcane_ultimatum
+          arcane_velocity
+          arcane_victory
+          ash_prime_set
+          atlas_prime_set
+          augur_secrets
+          axi_a1_relic
+          axi_h3_relic
+          axi_l5_relic
+          ballistica_prime_set
+          banshee_prime_set
+          baruuk_prime_set
+          baza_prime_set
+          blind_rage
+          blood_rush
+          boar_prime_set
+          boltor_prime_set
+          braton_prime_set
+          brief_respite
+          broken_war_set
+          burston_prime_set
+          caliban_prime_set
+          cascadia_accuracy
+          cascadia_flare
+          cernos_prime_set
+          chroma_prime_set
+          condition_overload
+          constitution
+          continuity
+          corinth_prime_set
+          corrosive_projection
+          dakra_prime_set
+          destreza_prime_set
+          dual_kamas_prime_set
+          ember_prime_set
+          energy_siphon
+          equilibrium
+          equinox_prime_set
+          eternal_onslaught
+          euphona_prime_set
+          exodia_contagion
+          exodia_force
+          fang_prime_set
+          fleeting_expertise
+          flow
+          frost_prime_set
+          fulmin_prime_set
+          galvanized_acceleration
+          galvanized_aptitude
+          galvanized_diffusion
+          galvanized_elementalist
+          galvanized_hell
+          galvanized_savvy
+          galvanized_scope
+          gara_prime_set
+          garuda_prime_set
+          gauss_prime_set
+          glaive_prime_set
+          grendel_prime_set
+          growing_power
+          gyre_prime_set
+          handspring
+          harrow_prime_set
+          hikou_prime_set
+          hildryn_prime_set
+          hunter_adrenaline
+          hunter_munitions
+          hydroid_prime_set
+          inaros_prime_set
+          intensify
+          ivara_prime_set
+          khora_prime_set
+          kogake_prime_set
+          kronen_prime_set
+          latron_prime_set
+          lex_prime_set
+          limbo_prime_set
+          lith_g1_relic
+          loki_prime_set
+          mag_prime_set
+          magus_elevate
+          magus_lockdown
+          magus_repair
+          melee_duplicate
+          melee_influence
+          mesa_prime_set
+          meso_b4_relic
+          meso_n11_relic
+          mirage_prime_set
+          molt_augmented
+          molt_efficiency
+          molt_vigor
+          narrow_minded
+          natural_talent
+          nekros_prime_set
+          neo_z1_relic
+          nezha_prime_set
+          nidus_prime_set
+          nikana_prime_set
+          ninkondi_prime_set
+          nova_prime_set
+          nyx_prime_set
+          oberon_prime_set
+          octavia_prime_set
+          orthos_prime_set
+          overextended
+          paris_prime_set
+          primary_dexterity
+          primary_merciless
+          primed_continuity
+          primed_cryo_rounds
+          primed_fever_strike
+          primed_flow
+          primed_heated_charge
+          primed_pressure_point
+          primed_ravage
+          primed_reach
+          primed_target_cracker
+          protea_prime_set
+          pyrana_prime_set
+          reaper_prime_set
+          redeemer_prime_set
+          redirection
+          requiem_i_relic
+          requiem_iv_relic
+          revenant_prime_set
+          rhino_prime_set
+          rolling_guard
+          rubico_prime_set
+          rush
+          saryn_prime_set
+          secondary_dexterity
+          secondary_encumber
+          sevagoth_prime_set
+          sicarus_prime_set
+          silva_and_aegis_prime_set
+          soma_prime_set
+          spira_prime_set
+          stand_united
+          steel_fiber
+          stradavar_prime_set
+          streamline
+          stretch
+          strun_prime_set
+          styanax_prime_set
+          sybaris_prime_set
+          tenora_prime_set
+          theorem_contagion
+          tigris_prime_set
+          titania_prime_set
+          transient_fortitude
+          trinity_prime_set
+          trumna_prime_set
+          valkyr_prime_set
+          vasto_prime_set
+          vauban_prime_set
+          vectis_prime_set
+          venka_prime_set
+          vigor
+          virtuos_fury
+          virtuos_strike
+          vitality
+          volt_prime_set
+          voruna_prime_set
+          weeping_wounds
+          wisp_prime_set
+          wukong_prime_set
+          xaku_prime_set
+          yareli_prime_set
+          zephyr_prime_set
+          zhuge_prime_set
+          """.split()
+
+          def get_json(url, timeout=20):
+              req = urllib.request.Request(url, headers=UA)
+              with urllib.request.urlopen(req, timeout=timeout) as r:
+                  return json.load(r)
+
+          def fetch_prices(deadline):
+              prices = {}
+              for s in SLUGS:
+                  if time.time() > deadline:
+                      print("deadline reached, stop early at", s)
+                      break
+                  try:
+                      top = get_json("https://api.warframe.market/v2/orders/item/%s/top" % s)
+                      sells = sorted(o["platinum"] for o in top.get("data", {}).get("sell", []) if o.get("visible", True))
+                      buys = sorted((o["platinum"] for o in top.get("data", {}).get("buy", []) if o.get("visible", True)), reverse=True)
+                      low = sells[:12]
+                      rec = {
+                          "sell": low[len(low) // 2] if low else None,
+                          "sellMin": sells[0] if sells else None,
+                          "buy": buys[0] if buys else None,
+                          "depth": len(sells),
+                      }
+                      try:
+                          st = get_json("https://api.warframe.market/v1/items/%s/statistics" % s, timeout=10)
+                          rows = []
+                          sc = st.get("data", {}) or {}
+                          for key in ("statistics_closed", "statistics"):
+                              cand = sc.get(key) or {}
+                              if isinstance(cand, list):
+                                  for blk in cand:
+                                      rows += (blk.get("48h", []) or blk.get("live", []))
+                              elif isinstance(cand, dict):
+                                  rows += (cand.get("48h", []) or cand.get("live", []))
+                          rows = [(c.get("datetime"), c.get("avg_price"), c.get("volume", 0))
+                                  for c in rows if c.get("avg_price") is not None]
+                          if len(rows) >= 8:
+                              recent = rows[-6:]
+                              prior = rows[-42:-6] or rows[:-6]
+                              ra = sum(x[1] for x in recent) / len(recent)
+                              pa = sum(x[1] for x in prior) / len(prior) if prior else None
+                              if pa and ra:
+                                  rec["prev"] = round((ra / pa - 1) * 100, 2)
+                                  rec["rvol"] = sum(x[2] for x in recent)
+                              rec["vol48"] = sum(x[2] for x in rows)
+                              rec["avg48"] = round(sum(x[1] for x in rows) / len(rows), 2)
+                      except Exception as e:
+                          print("  trend skip", s, str(e)[:80])
+                      prices[s] = rec
+                      time.sleep(0.25)
+                  except Exception as e:
+                      print("skip", s, str(e)[:120])
+                      time.sleep(0.5)
+              return prices
+
+          start = time.time()
+          deadline = start + 600
+          prices = fetch_prices(deadline)
+          tz = datetime.timezone(datetime.timedelta(hours=8))
+          now = datetime.datetime.now(datetime.timezone.utc)
+          out = {
+              "generatedAt": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+              "generatedAtLocal": now.astimezone(tz).strftime("%Y-%m-%d %H:%M"),
+              "platform": "pc",
+              "source": "warframe.market via GitHub Action",
+              "prices": prices,
+          }
+          with open("market.json", "w", encoding="utf-8") as f:
+              json.dump(out, f, ensure_ascii=False)
+          print("market.json written:", len(prices), "items in %.1fs" % (time.time() - start))
+          PY
+
+      - name: Commit and push
+        run: |
+          git config user.name "wf-mirror"
+          git config user.email "wf-mirror@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "no changes"
+          else
+            git commit -m "mirror $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
